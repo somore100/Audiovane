@@ -1,6 +1,13 @@
-# AI Voice Studio - Handoff v17
+# Audiovane (formerly AI Voice Studio) - Handoff v17
 
-Project: `/home/domore100/AI_Workspace/projects/Local/ai_voice_studio` (Claude sandbox: `/run/host/home/domore100/...`).
+Project: `/home/domore100/AI_Workspace/projects/Local/audiovane` (Claude sandbox: `/run/host/home/domore100/...`). GitHub: somore100/Audiovane. Renamed from "AI Voice Studio" on 2026-11-14; `legacy.py` migrates the old settings/models folders and login entry. Older notes below may still say "AI Voice Studio".
+
+## Update 2026-11-17
+* `main` is at 1d087e9 (security-audit PR #9 merged, v1.1.0). **PR #10** (`rename/audiovane`: the rename + a fix restoring the missing `_api_status` label) is OPEN, not merged; the window opens (user-confirmed on Linux). Windows/packaged builds untested.
+* Venv must be **Python 3.12** (`python3.12 -m venv venv && pip install -r requirements.txt`). A 3.14 venv fails: `audioop` is gone in 3.13+ and the torch pins target 3.12. If PyAudio fails to build: `sudo dnf install portaudio-devel python3.12-devel gcc`.
+* The `ALSA lib ... Unknown PCM cards.pcm.rear/center_lfe/side` lines at startup are harmless pygame/SDL probing.
+* Next: merge PR #10 (user decides), run `python selftest.py` against the real app, then the audit leftovers and "Next" list below.
+* Possible feature: an MCP tool to open the app window.
 Python 3.12 + Tkinter. `main.py`, `audio_fx.py`, `curve_editor.py`, `voice_finder.py`, `live_pitch.py`, `subtitles.py`, `api_server.py`, `feedback.py`, `engines/`.
 
 ## Environment notes
