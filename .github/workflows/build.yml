@@ -44,6 +44,10 @@ jobs:
         python -m PyInstaller audiovane.spec --clean --noconfirm
       shell: cmd
 
+    - name: Smoke test the packaged exe (MCP handshake)
+      run: python ci_smoke.py dist\Audiovane\Audiovane.exe
+      shell: cmd
+
     - name: Prepare bundled Python 3.12
       run: |
         mkdir python_bundled
@@ -82,7 +86,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Audiovane_Windows_Setup
-        path: setup_output\Audiovane_Setup_v1.0.exe
+        path: setup_output\Audiovane_Setup_v*.exe
         retention-days: 30
 
     - name: Upload EXE only
@@ -96,7 +100,7 @@ jobs:
   #  LINUX — AppImage
   # ─────────────────────────────────────────────────────────────
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04     # pinned: ubuntu-latest is moving to Ubuntu 26
 
     steps:
     - name: Checkout repository
@@ -123,6 +127,9 @@ jobs:
 
     - name: Build with PyInstaller
       run: python -m PyInstaller audiovane_linux.spec --clean --noconfirm
+
+    - name: Smoke test the packaged app (MCP handshake)
+      run: python ci_smoke.py dist/Audiovane/Audiovane
 
     - name: Download AppImage tools
       run: |
@@ -190,6 +197,9 @@ jobs:
 
     - name: Build .app with PyInstaller
       run: python -m PyInstaller audiovane_macos.spec --clean --noconfirm
+
+    - name: Smoke test the packaged app (MCP handshake)
+      run: python ci_smoke.py dist/Audiovane.app/Contents/MacOS/Audiovane
 
     - name: Zip the .app bundle
       run: |

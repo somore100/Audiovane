@@ -21,7 +21,7 @@ DefaultDirName={autopf}\Audiovane
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 OutputDir=setup_output
-OutputBaseFilename=Audiovane_Setup_v1.0
+OutputBaseFilename=Audiovane_Setup_v{#AppVersion}
 SetupIconFile=logo.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -56,7 +56,7 @@ Source: "dist\Audiovane\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 Source: "logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "download_models.py"; DestDir: "{app}"; Flags: ignoreversion
-; Bundled Python 3.10 for model downloading
+; Bundled Python 3.12 for model downloading
 Source: "python_bundled\*"; DestDir: "{app}\python"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -65,12 +65,10 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#AppShortName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
 [Run]
-; Use bundled Python to install packages and download models
-Filename: "{app}\python\python.exe"; Parameters: "-m pip install TTS openai-whisper vosk pygame SpeechRecognition PyAudio numpy librosa"; StatusMsg: "Installing packages..."; Flags: runhidden waituntilterminated
-Filename: "{app}\python\python.exe"; Parameters: "-m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu"; StatusMsg: "Installing PyTorch (large download)..."; Flags: runhidden waituntilterminated
-Filename: "{app}\python\python.exe"; Parameters: """{app}\download_models.py"" --whisper"; StatusMsg: "Downloading Whisper model (~150MB)..."; Flags: runhidden waituntilterminated
-Filename: "{app}\python\python.exe"; Parameters: """{app}\download_models.py"" --vctk"; StatusMsg: "Downloading English voices (~100MB)..."; Flags: runhidden waituntilterminated
-Filename: "{app}\python\python.exe"; Parameters: """{app}\download_models.py"" --xtts"; StatusMsg: "Downloading multilingual voices (~2GB)..."; Flags: runhidden waituntilterminated
+; The bundled Python is only needed by download_models.py, so install its
+; packages (same pins as requirements.txt) only when a model download is chosen.
+Filename: "{app}\python\python.exe"; Parameters: "-m pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cpu"; StatusMsg: "Installing PyTorch (large download)..."; Flags: runhidden waituntilterminated; Tasks: install_models install_xtts
+Filename: "{app}\python\python.exe"; Parameters: "-m pip install ""certifi>=2026.10.18"" ""coqui-tts[codec]"" ""transformers>=4.46,<4.57"" openai-whisper"; StatusMsg: "Installing packages..."; Flags: runhidden waituntilterminated; Tasks: install_models install_xtts
 ; Download basic models if selected
 Filename: "{app}\python\python.exe"; Parameters: """{app}\download_models.py"" --whisper --vctk"; StatusMsg: "Downloading basic AI models (Whisper + VCTK, ~250MB)..."; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: install_models
 ; Download XTTS if selected  
