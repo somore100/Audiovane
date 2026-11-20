@@ -36,3 +36,15 @@ The score is a proxy: finish with a blind listening comparison.
 
 For each engine (XTTS-v2, F5-TTS, Chatterbox, ...): generate the same 5 new sentences from each
 `refs/*.wav` (3 seeds), score them, and compare against the ceiling and the floor.
+
+## 3. Generate and score with an engine
+
+```bash
+python tools/voice_bench/bench.py ~/.local/share/audiovane/voice_bench/NAME --engine xtts --floor am_adam,bm_george --blind
+```
+
+Speaks 5 new sentences from each reference set, scores them against the held-out clips and prints one
+table (similarity, f0, speed, real-time factor) next to the ceiling and the floor voices. `--blind`
+writes a shuffled `listen/` folder: rate each clip by ear first, then open `listen/key.json`.
+`--refs 06,30 --limit 2 --seeds 3` narrow or widen the run. XTTS-v2 must already be downloaded in the app.
+Other engines plug in as one function in `ENGINES` (see the file).
