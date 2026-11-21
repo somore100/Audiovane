@@ -72,15 +72,8 @@ def make_xtts():
         torch.serialization.add_safe_globals([XttsConfig])
     except Exception:
         pass
-    # torchaudio 2.10's load() needs the separate `torchcodec` package, which XTTS's reference-clip
-    # loader calls. Read the reference with soundfile instead, so no extra install is needed.
-    import soundfile as sf
-    import torchaudio
-
-    def _load(path, *args, **kw):
-        y, sr = sf.read(path, dtype="float32", always_2d=True)
-        return torch.from_numpy(y.T.copy()), sr
-    torchaudio.load = _load
+    from engines.coqui_xtts import patch_torchaudio_load      # same torchcodec workaround as the app
+    patch_torchaudio_load()
     from TTS.api import TTS
     dev = common.device()
     print(f"loading XTTS-v2 on {dev} ...")
