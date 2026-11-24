@@ -16,14 +16,28 @@ Nothing else in the app needs to change - the Models table rows, the
 Check All / Download Missing buttons, per-engine license dialogs, and
 the voice dropdown all populate themselves from this dict.
 """
+import dataclasses
+import os
+import sys
+
 from . import coqui_vctk, coqui_xtts, kokoro
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import model_lock  # noqa: E402  (shared by the window and the Local API)
+
+
+def _shared(spec):
+    """Make synthesize / list_voices (which may load the model) take the shared model lock."""
+    return dataclasses.replace(
+        spec, synthesize=model_lock.locked(spec.synthesize),
+        list_voices=model_lock.locked(spec.list_voices))
 
 
 def get_tts_engines(models_base):
     return {
-        "vctk": coqui_vctk.build(models_base),
-        "xtts": coqui_xtts.build(models_base),
-        "kokoro": kokoro.build(models_base),
+        "vctk": _shared(coqui_vctk.build(models_base)),
+        "xtts": _shared(coqui_xtts.build(models_base)),
+        "kokoro": _shared(kokoro.build(models_base)),
         # Future engines go here, e.g.:
         # "piper":       piper.build(models_base),
         # "kokoro":      kokoro.build(models_base),

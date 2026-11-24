@@ -26,6 +26,7 @@ Security model (changed):
 import hmac
 import io
 import json
+import model_lock
 import os
 import secrets
 import shutil
@@ -449,7 +450,7 @@ class ApiServer:
         self._extra_origins = {str(o).rstrip("/").lower() for o in allowed_origins}
         self._httpd = None
         self._thread = None
-        self._lock = threading.Lock()      # models are heavy: one job at a time
+        self._lock = model_lock.LOCK       # models are heavy: one job at a time, shared with the window
         self._jobs = threading.BoundedSemaphore(1 + MAX_QUEUED_JOBS)
         self._mem_lock = threading.Lock()
         self._inflight = 0

@@ -57,6 +57,7 @@ try:
 except Exception as _e:
     print(f"[AVS] Warning: could not set up certifi CA bundle: {_e}")
 
+import model_lock
 import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import threading
@@ -286,28 +287,50 @@ except Exception:
     FASTER_WHISPER_AVAILABLE = False
 _VC_FW = "Whisper (fast)"
 
+class _LockedModel:
+    """Whisper models are shared by the window and the Local API and are not thread-safe:
+    every transcribe() runs under the shared model lock (see model_lock.py).
+    faster-whisper returns its segments lazily, so they are collected inside the lock."""
+    def __init__(self, model, lazy_segments=False):
+        self._m, self._lazy = model, lazy_segments
+
+    def transcribe(self, *a, **kw):
+        with model_lock.LOCK:
+            out = self._m.transcribe(*a, **kw)
+            if self._lazy:
+                segs, info = out
+                return list(segs), info
+            return out
+
+    def __getattr__(self, name):
+        return getattr(self._m, name)
+
+
+@model_lock.locked
 def get_fwhisper_model():
     """faster-whisper 'small' (int8, CPU). Downloads once into the models folder."""
     global _fwhisper_model
     if _fwhisper_model is None:
         from faster_whisper import WhisperModel
-        _fwhisper_model = WhisperModel(
+        _fwhisper_model = _LockedModel(WhisperModel(
             "small", device="cpu", compute_type="int8",
             cpu_threads=max(2, (os.cpu_count() or 4) - 1),
-            download_root=os.path.join(WHISPER_MODEL_DIR, "faster-whisper"))
+            download_root=os.path.join(WHISPER_MODEL_DIR, "faster-whisper")), lazy_segments=True)
     return _fwhisper_model
 
+@model_lock.locked
 def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
         import whisper
         model_file = os.path.join(WHISPER_MODEL_DIR, "small.pt")
         if os.path.isfile(model_file):
-            _whisper_model = whisper.load_model(model_file)
+            _whisper_model = _LockedModel(whisper.load_model(model_file))
         else:
-            _whisper_model = whisper.load_model("small")
+            _whisper_model = _LockedModel(whisper.load_model("small"))
     return _whisper_model
 
+@model_lock.locked
 def get_vosk_model(lang_code):
     if lang_code not in _vosk_models:
         from vosk import Model
