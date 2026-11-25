@@ -60,6 +60,28 @@ CPML_TEXT = (
 )
 
 
+def patch_torchaudio_load():
+    """torchaudio 2.10's load() needs the separate `torchcodec` package, which XTTS's
+    reference-clip loader (voice cloning) calls. When torchcodec is missing, read the
+    clip with soundfile instead, so cloning works without an extra install."""
+    try:
+        import torchcodec  # noqa: F401
+        return
+    except Exception:
+        pass
+    import soundfile as sf
+    import torch
+    import torchaudio
+    if getattr(torchaudio.load, "_avs_patched", False):
+        return
+
+    def _load(path, *args, **kw):
+        y, sr = sf.read(path, dtype="float32", always_2d=True)
+        return torch.from_numpy(y.T.copy()), sr
+    _load._avs_patched = True
+    torchaudio.load = _load
+
+
 def build(models_base):
     local_path = os.path.join(models_base, "xtts_v2")
 
@@ -96,6 +118,7 @@ def build(models_base):
                 torch.serialization.add_safe_globals([XttsConfig])
             except Exception:
                 pass
+            patch_torchaudio_load()
             from TTS.api import TTS
             if os.path.isdir(local_path):
                 _instance = TTS(
