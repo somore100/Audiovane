@@ -498,6 +498,10 @@ def _prefs_set(key, value):
         os.replace(tmp, path)
     except Exception: pass
 
+def _default_rec_folder():
+    """Where 'Save recording' puts microphone recordings unless the user picks another folder."""
+    return os.path.join(os.path.expanduser("~"), "Audiovane Recordings")
+
 def persist_folder(v):    _prefs_set("last_folder", v)
 def persist_favorites(v): _prefs_set("favorites", sorted(v))
 
@@ -1831,6 +1835,22 @@ class AIApp:
             fg=YELLOW, font=("Segoe UI",8))
         self._stt_note.pack(anchor="w", padx=2, pady=(2,2))
 
+        # Optional: keep the microphone audio as a WAV file (off by default; stays on this computer)
+        rec_row = tk.Frame(f, bg=CARD); rec_row.pack(fill="x", padx=2, pady=(0,2))
+        _rp = _prefs_load()
+        self.rec_save_var = tk.BooleanVar(value=bool(_rp.get("rec_save", False)))
+        self.rec_folder_var = tk.StringVar(value=str(_rp.get("rec_folder") or _default_rec_folder()))
+        ttk.Checkbutton(rec_row, text="Save recording", variable=self.rec_save_var).pack(side="left")
+        tk.Entry(rec_row, textvariable=self.rec_folder_var, bg=SURFACE, fg=FG,
+                 insertbackground=BLUE, relief="flat", font=("Segoe UI",9),
+                 width=34).pack(side="left", padx=6)
+        self._btn(rec_row, "Browse", self._rec_browse, color=SURFACE, padx=8).pack(side="left")
+        self.rec_save_var.trace_add("write", lambda *_: _prefs_set("rec_save", bool(self.rec_save_var.get())))
+        self.rec_folder_var.trace_add("write", lambda *_: _prefs_set("rec_folder", self.rec_folder_var.get().strip()))
+        self._label(f, "Keeps your speech as a WAV file (one per Start, silence cut out). Off by "
+                       "default; files stay on this computer.",
+                    fg=FG_DIM, font=("Segoe UI",8)).pack(anchor="w", padx=2, pady=(0,2))
+
         st = tk.Frame(f, bg=CARD); st.pack(fill="x", padx=2, pady=(2,0))
         self.stt_dot      = tk.Label(st, text="●", bg=CARD, fg=FG_DIM, font=("Segoe UI",13))
         self.stt_dot.pack(side="left")
@@ -2846,7 +2866,54 @@ class AIApp:
             time.sleep(0.07)
         self.root.after(0, lambda: self.live_word_var.set(""))
 
+    def _rec_browse(self):
+        d = filedialog.askdirectory(title="Folder for saved recordings",
+                                    initialdir=self.rec_folder_var.get() or os.path.expanduser("~"))
+        if d:
+            self.rec_folder_var.set(d)
+
+    def _rec_write(self, audio):
+        """Append one recognized phrase (a speech_recognition AudioData, mic's own sample rate,
+        16-bit mono) to this Start's WAV file. Silence between phrases is not kept. Opens the
+        file lazily, so a session with no speech leaves nothing behind. Never raises: a disk
+        problem is reported once and must not stop the transcription."""
+        if not self.rec_save_var.get() or getattr(self, "_rec_failed", False):
+            return
+        try:
+            import recorder
+            rec = getattr(self, "_rec", None)
+            if rec is None:
+                rec = self._rec = recorder.PhraseRecorder(
+                    self.rec_folder_var.get().strip() or _default_rec_folder())
+            rec.write(audio.get_raw_data(convert_width=2), audio.sample_rate)
+        except Exception as e:                      # noqa: BLE001
+            self._rec_failed = True
+            print(f"[AVS] Save recording failed: {e!r}", flush=True)
+            self.root.after(0, lambda err=str(e): self._set_stt_status(
+                f"Could not save the recording: {err}", RED))
+
+    def _rec_close(self):
+        rec, self._rec = getattr(self, "_rec", None), None
+        self._rec_failed = False
+        if rec is None:
+            return
+        try:
+            done = rec.close()
+            if done:
+                path, secs = done
+                print(f"[AVS] Recording saved: {path} ({secs:.0f}s)", flush=True)
+                self.root.after(0, lambda p=os.path.basename(path), s=secs: self._set_stt_status(
+                    f"Recording saved: {p} ({s:.0f}s)", GREEN))
+        except Exception as e:                      # noqa: BLE001
+            print(f"[AVS] Save recording failed: {e!r}", flush=True)
+
     def _listen_loop(self):
+        try:
+            self._listen_loop_inner()
+        finally:
+            self._rec_close()
+
+    def _listen_loop_inner(self):
         engine    = self.stt_engine.get()
         lang_disp = self.stt_lang_var.get()
         mic_index = self._resolve_mic_index()
@@ -2887,6 +2954,7 @@ class AIApp:
                             self.root.after(0, lambda: self._set_stt_status("Listening...", GREEN))
                             self.root.after(0, lambda: self.live_word_var.set(""))
                             audio = self.recognizer.listen(source, phrase_time_limit=7)
+                            self._rec_write(audio)
                             self.root.after(0, lambda: self._set_stt_status("Processing...", YELLOW))
                             raw = np.frombuffer(
                                 audio.get_raw_data(convert_rate=16000, convert_width=2),
@@ -2930,6 +2998,7 @@ class AIApp:
                             self.root.after(0, lambda: self._set_stt_status("Listening...", GREEN))
                             self.root.after(0, lambda: self.live_word_var.set(""))
                             audio = self.recognizer.listen(source, phrase_time_limit=7)
+                            self._rec_write(audio)
                             raw = audio.get_raw_data(convert_rate=16000, convert_width=2)
                             if rec.AcceptWaveform(raw):
                                 result = json.loads(rec.Result())
