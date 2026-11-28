@@ -80,11 +80,15 @@ def transcribe_words(model, wav_path, language=None):
 
 
 def _wrap_text(text, max_chars_per_line, max_lines):
+    """Wrap `text` into caption lines. Returns a list of cards, each a string of at most
+    `max_lines` lines. Nothing is ever dropped: greedy wrapping can need a third line even
+    when the whole text is within max_chars_per_line * max_lines, so the extra lines
+    become another card instead of being cut off."""
     lines = textwrap.wrap(text, width=max_chars_per_line,
                            break_long_words=False, break_on_hyphens=False)
     if not lines:
-        return text
-    return "\n".join(lines[:max_lines])
+        return [text]
+    return ["\n".join(lines[i:i + max_lines]) for i in range(0, len(lines), max_lines)]
 
 
 def chunk_into_captions(words, max_chars_per_line=42, max_lines=2,
@@ -120,11 +124,14 @@ def chunk_into_captions(words, max_chars_per_line=42, max_lines=2,
             return
         text = current_text().strip()
         if text:
-            captions.append({
-                "start": current[0]["start"],
-                "end": current[-1]["end"],
-                "text": _wrap_text(text, max_chars_per_line, max_lines),
-            })
+            start, end = current[0]["start"], current[-1]["end"]
+            cards = _wrap_text(text, max_chars_per_line, max_lines)
+            total = float(sum(len(c) for c in cards)) or 1.0
+            t = start
+            for i, card in enumerate(cards):          # usually one card; extra ones share the time
+                nxt = end if i == len(cards) - 1 else t + (end - start) * len(card) / total
+                captions.append({"start": t, "end": nxt, "text": card})
+                t = nxt
         current.clear()
 
     for w in words:

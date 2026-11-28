@@ -2497,8 +2497,11 @@ class AIApp:
         i = 1
         while True:
             p = os.path.join(folder, f"ai_voice{i}.wav")
-            if not os.path.exists(p): return p
-            i += 1
+            try:
+                open(p, "xb").close()      # reserve the name now, so a second quick Save gets the next one
+                return p
+            except FileExistsError:
+                i += 1
 
     def _get_text(self):
         t = self.text_entry.get("1.0", tk.END).strip()
@@ -2833,6 +2836,11 @@ class AIApp:
             _col = YELLOW if "FAILED" in fx else GREEN
             self.root.after(0, lambda: self._set_tts_status(f"Saved! - {fx}", _col))
         except Exception as e:
+            try:
+                if os.path.getsize(out) == 0:       # drop the empty placeholder get_next_filename() reserved
+                    os.remove(out)
+            except OSError:
+                pass
             print(f"[AVS] Save failed: {e}")
             traceback.print_exc()
             if e.__cause__ is not None:
@@ -2872,29 +2880,28 @@ class AIApp:
         if d:
             self.rec_folder_var.set(d)
 
-    def _rec_write(self, audio):
+    def _rec_write(self, audio, st):
         """Append one recognized phrase (a speech_recognition AudioData, mic's own sample rate,
-        16-bit mono) to this Start's WAV file. Silence between phrases is not kept. Opens the
-        file lazily, so a session with no speech leaves nothing behind. Never raises: a disk
-        problem is reported once and must not stop the transcription."""
-        if not self.rec_save_var.get() or getattr(self, "_rec_failed", False):
+        16-bit mono) to this capture loop's WAV file (`st` is the loop's own state dict, so two
+        loops never share a file). Silence between phrases is not kept. Opens the file lazily,
+        so a session with no speech leaves nothing behind. Never raises: a disk problem is
+        reported once and must not stop the transcription."""
+        if not self.rec_save_var.get() or st.get("failed"):
             return
         try:
             import recorder
-            rec = getattr(self, "_rec", None)
-            if rec is None:
-                rec = self._rec = recorder.PhraseRecorder(
+            if st.get("rec") is None:
+                st["rec"] = recorder.PhraseRecorder(
                     self.rec_folder_var.get().strip() or _default_rec_folder())
-            rec.write(audio.get_raw_data(convert_width=2), audio.sample_rate)
+            st["rec"].write(audio.get_raw_data(convert_width=2), audio.sample_rate)
         except Exception as e:                      # noqa: BLE001
-            self._rec_failed = True
+            st["failed"] = True
             print(f"[AVS] Save recording failed: {e!r}", flush=True)
             self.root.after(0, lambda err=str(e): self._set_stt_status(
                 f"Could not save the recording: {err}", RED))
 
-    def _rec_close(self):
-        rec, self._rec = getattr(self, "_rec", None), None
-        self._rec_failed = False
+    def _rec_close(self, st):
+        rec, st["rec"] = st.get("rec"), None
         if rec is None:
             return
         try:
@@ -2908,12 +2915,17 @@ class AIApp:
             print(f"[AVS] Save recording failed: {e!r}", flush=True)
 
     def _listen_loop(self):
+        # Every Start / Continue / Overwrite begins a new loop with a new generation number. A
+        # previous loop may still be blocked in listen() (it has no timeout); when it wakes up
+        # it sees it is stale and ends without touching the transcript or the status line.
+        self._listen_gen = gen = getattr(self, "_listen_gen", 0) + 1
+        st = {}
         try:
-            self._listen_loop_inner()
+            self._listen_loop_inner(gen, st)
         finally:
-            self._rec_close()
+            self._rec_close(st)
 
-    def _listen_loop_inner(self):
+    def _listen_loop_inner(self, gen, st):
         engine    = self.stt_engine.get()
         lang_disp = self.stt_lang_var.get()
         mic_index = self._resolve_mic_index()
@@ -2949,12 +2961,14 @@ class AIApp:
             try:
                 with self._open_mic(mic_index) as source:
                     self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                    while self.is_listening:
+                    while self.is_listening and gen == self._listen_gen:
                         try:
                             self.root.after(0, lambda: self._set_stt_status("Listening...", GREEN))
                             self.root.after(0, lambda: self.live_word_var.set(""))
                             audio = self.recognizer.listen(source, phrase_time_limit=7)
-                            self._rec_write(audio)
+                            if gen != self._listen_gen:
+                                break              # a newer loop took over while this one waited
+                            self._rec_write(audio, st)
                             self.root.after(0, lambda: self._set_stt_status("Processing...", YELLOW))
                             raw = np.frombuffer(
                                 audio.get_raw_data(convert_rate=16000, convert_width=2),
@@ -2989,23 +3003,23 @@ class AIApp:
                 self.root.after(0, lambda: self._stt_set_state("idle"))
                 self.is_listening = False; return
 
-            rec = KaldiRecognizer(vosk_model, 16000); rec.SetWords(True)
             try:
                 with self._open_mic(mic_index) as source:
                     self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                    while self.is_listening:
+                    while self.is_listening and gen == self._listen_gen:
                         try:
                             self.root.after(0, lambda: self._set_stt_status("Listening...", GREEN))
                             self.root.after(0, lambda: self.live_word_var.set(""))
                             audio = self.recognizer.listen(source, phrase_time_limit=7)
-                            self._rec_write(audio)
+                            if gen != self._listen_gen:
+                                break              # a newer loop took over while this one waited
+                            self._rec_write(audio, st)
                             raw = audio.get_raw_data(convert_rate=16000, convert_width=2)
-                            if rec.AcceptWaveform(raw):
-                                result = json.loads(rec.Result())
-                                text = result.get("text","").strip()
-                            else:
-                                partial = json.loads(rec.PartialResult())
-                                text = partial.get("partial","").strip()
+                            # A fresh recognizer per phrase + FinalResult: PartialResult() of a
+                            # long-lived recognizer is cumulative and repeated the whole transcript.
+                            rec = KaldiRecognizer(vosk_model, 16000)
+                            rec.AcceptWaveform(raw)
+                            text = json.loads(rec.FinalResult()).get("text", "").strip()
                             if text:
                                 self._push_words(text)
                                 self.root.after(0, lambda: self._set_stt_status("Listening...", GREEN))
@@ -3022,8 +3036,9 @@ class AIApp:
                 self.root.after(0, lambda: self._stt_set_state("idle"))
                 self.is_listening = False
 
-        self.root.after(0, lambda: self._set_stt_status("Idle", FG_DIM))
-        self.root.after(0, lambda: self.live_word_var.set(""))
+        if gen == self._listen_gen:                 # a stale loop must not overwrite the new one's status
+            self.root.after(0, lambda: self._set_stt_status("Idle", FG_DIM))
+            self.root.after(0, lambda: self.live_word_var.set(""))
 
     def minimized_mode(self):
         # Was a one-way trip before: it always hid the transcript and
@@ -3803,6 +3818,7 @@ def _uninstall_model(self, key):
         return
 
     def _work():
+        global _whisper_model, _fwhisper_model     # the outer `global` does not reach this nested function
         failed = []
         for p in paths:
             try:
@@ -3815,7 +3831,9 @@ def _uninstall_model(self, key):
         # drop the in-memory copy so the next use reloads (or reports missing)
         try:
             if key == "whisper":
-                _whisper_model = None
+                with model_lock.LOCK:               # not while a transcription is using it
+                    _whisper_model = None
+                    _fwhisper_model = None
             else:
                 mod = sys.modules.get({"vctk": "engines.coqui_vctk",
                                        "xtts": "engines.coqui_xtts",
